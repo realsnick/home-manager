@@ -70,6 +70,19 @@ writing a Home Manager configuration.
 [[sec-flakes-standalone]]
 === Standalone setup
 
+[IMPORTANT]
+====
+WORK IN PROGRESS
+
+To install Home Manager with flake support run
+
+[source,console]
+$ nix run home-manager/master -- install --with-flake
+$ nix run home-manager/release-22.11 -- install --with-flake
+
+This will generate a `flake.nix` and a `home.nix` file in `~/.config/nixpkgs``.
+====
+
 1. Set up a flake with a `flake.nix` as follows:
 +
 [source,nix]

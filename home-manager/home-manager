@@ -162,6 +162,138 @@ function doInspectOption() {
         "${PASSTHROUGH_OPTS[@]}"
 }
 
+function doInstall() {
+    while (( $# > 0 )); do
+        local opt="$1"
+        shift
+
+        case $opt in
+            --with-flake)
+                local withFlake=1
+                ;;
+            *)
+                _iError "%s: unknown option '%s'" "$0" "$opt" >&2
+                exit 1
+                ;;
+        esac
+    done
+
+    local confDir="${XDG_CONFIG_HOME:-$HOME/.config}/nixpkgs"
+    local confFile="$confDir/home.nix"
+    local flakeFile="$confDir/flake.nix"
+
+    if [[ ! -e $confFile ]]; then
+        echo
+        _i "Creating initial Home Manager configuration..."
+        local nl=$'\n'
+        local xdgVars=""
+        if [[ -v XDG_CACHE_HOME && $XDG_CACHE_HOME != "$HOME/.cache" ]]; then
+            xdgVars="$xdgVars  xdg.cacheHome = \"$XDG_CACHE_HOME\";$nl"
+        fi
+        if [[ -v XDG_CONFIG_HOME && $XDG_CONFIG_HOME != "$HOME/.config" ]]; then
+            xdgVars="$xdgVars  xdg.configHome = \"$XDG_CONFIG_HOME\";$nl"
+        fi
+        if [[ -v XDG_DATA_HOME && $XDG_DATA_HOME != "$HOME/.local/share" ]]; then
+            xdgVars="$xdgVars  xdg.dataHome = \"$XDG_DATA_HOME\";$nl"
+        fi
+        if [[ -v XDG_STATE_HOME && $XDG_STATE_HOME != "$HOME/.local/state" ]]; then
+            xdgVars="$xdgVars  xdg.stateHome = \"$XDG_STATE_HOME\";$nl"
+        fi
+
+        mkdir -p "$confDir"
+        cat > "$confFile" <<EOF
+{ config, pkgs, ... }:
+
+{
+  # Home Manager needs a bit of information about you and the
+  # paths it should manage.
+  home.username = "$USER";
+  home.homeDirectory = "$HOME";
+$xdgVars
+  # This value determines the Home Manager release that your
+  # configuration is compatible with. This helps avoid breakage
+  # when a new Home Manager release introduces backwards
+  # incompatible changes.
+  #
+  # You can update Home Manager without changing this value. See
+  # the Home Manager release notes for a list of state version
+  # changes in each release.
+  home.stateVersion = "22.11";
+
+  # Let Home Manager install and manage itself.
+  programs.home-manager.enable = true;
+}
+EOF
+    else
+        echo
+        _i 'The file %s already exists, skipping generation...' "$confFile"
+    fi
+
+    if [[ -v withFlake ]]; then
+        if [[ ! -e $flakeFile ]]; then
+            FLAKE_ARG="$confDir"
+
+            echo
+            _i "Creating initial Home Manager Flake file..."
+
+            local nixSystem
+            nixSystem=$(nix eval --expr builtins.currentSystem --raw --impure)
+
+            mkdir -p "$confDir"
+            cat > "$flakeFile" <<EOF
+{
+  description = "Home Manager configuration of $USER";
+
+  inputs = {
+    # Specify the source of Home Manager and Nixpkgs.
+    nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
+    home-manager = {
+      url = "github:nix-community/home-manager";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+  };
+
+  outputs = { nixpkgs, home-manager, ... }:
+    let
+      system = "$nixSystem";
+      pkgs = nixpkgs.legacyPackages.\${system};
+    in {
+      homeConfigurations.$USER = home-manager.lib.homeManagerConfiguration {
+        inherit pkgs;
+
+        # Specify your home configuration modules here, for example,
+        # the path to your home.nix.
+        modules = [ ./home.nix ];
+
+        # Optionally use extraSpecialArgs
+        # to pass through arguments to home.nix
+      };
+    };
+}
+EOF
+        else
+            echo
+            _i 'The file %s already exists, skipping generation...' "$flakeFile"
+        fi
+    fi
+
+    echo
+    _i "Creating initial Home Manager generation..."
+    echo
+
+    if doSwitch; then
+        # translators: The "%s" specifier will be replaced by a file path.
+        _i $'All done! The home-manager tool should now be installed and you can edit\n\n    %s\n\nto configure Home Manager. Run \'man home-configuration.nix\' to\nsee all available options.' \
+        "$confFile"
+      exit 0
+    else
+      # translators: The "%s" specifier will be replaced by a URL.
+      _i $'Uh oh, the installation failed! Please create an issue at\n\n    %s\n\nif the error seems to be the fault of Home Manager.' \
+        "https://github.com/nix-community/home-manager/issues"
+      exit 1
+    fi
+}
+
 function doInstantiate() {
     setFlakeAttribute
     if [[ -v FLAKE_CONFIG_URI ]]; then
@@ -606,7 +738,7 @@ while [[ $# -gt 0 ]]; do
     opt="$1"
     shift
     case $opt in
-        build|instantiate|option|edit|expire-generations|generations|help|news|packages|remove-generations|switch|uninstall)
+        build|install|instantiate|option|edit|expire-generations|generations|help|news|packages|remove-generations|switch|uninstall)
             COMMAND="$opt"
             ;;
         -A)
@@ -682,7 +814,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         *)
             case $COMMAND in
-                expire-generations|remove-generations|option)
+                install|expire-generations|remove-generations|option)
                     COMMAND_ARGS+=("$opt")
                     ;;
                 *)
@@ -706,6 +838,9 @@ case $COMMAND in
         ;;
     build)
         doBuild
+        ;;
+    install)
+        doInstall "${COMMAND_ARGS[@]}"
         ;;
     instantiate)
         doInstantiate
